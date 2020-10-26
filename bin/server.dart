@@ -27,29 +27,24 @@ void main(List<String> args) async {
 
   var app = Router();
   final history = <String,Map>{};
-  final serverAck = <String,Completer<Map>>{};
   final clientAck = <String,Completer<Null>>{};
 
-  app.post('/cgi-ssl/mpo_auth.cgi', (Request request) async {
-
+  app.get('/cgi-ssl/mpo_auth_reply.cgi', (Request request) async {
     final transId = request.url.queryParameters['transid'];
+    return Response.ok('Return to testsuite');
+  });
 
-    if(!clientAck.containsKey(transId)) {
-      clientAck[transId] = Completer<Null>();
-    }
-    await clientAck[transId].future;
-    clientAck.remove(transId);
-
+  app.post('/cgi-ssl/mpo_auth.cgi', (Request request) async {
+    final transId = request.url.queryParameters['transid'];
 
     final map = json.decode(await request.readAsString());
     history[transId] = map;
 
-    if(!serverAck.containsKey(transId)) {
-      serverAck[transId] = Completer<Null>();
+    if(clientAck.containsKey(transId)) {
+      clientAck[transId].complete();
     }
-    serverAck[transId].complete();
 
-    return Response.ok('');
+    return Response(204);
   });
 
   app.get('/request', (Request request) {
@@ -57,17 +52,21 @@ void main(List<String> args) async {
   });
 
   app.get('/request/<transId>', (Request request, String transId) async {
-    if(!clientAck.containsKey(transId)) {
-      clientAck[transId] = Completer<Null>();
-    }
-    clientAck[transId].complete();
+    final clientWait = request.url.queryParameters.containsKey('await');
 
-    if(!serverAck.containsKey(transId)) {
-      serverAck[transId] = Completer<Null>();
+    if(!history.containsKey(transId)) {
+      // Await the value
+      if(clientWait) {
+        if(!clientAck.containsKey(transId)) {
+          clientAck[transId] = Completer<Null>();
+        }
+        await clientAck[transId].future;
+      }
+      // Just try again later
+      else {
+        return Response(404, body: 'No such transaction yet.');
+      }
     }
-
-    await serverAck[transId].future;
-    serverAck.remove(transId);
 
     return Response.ok(json.encode(history[transId]), headers: ContentType.json.parameters);
   });
